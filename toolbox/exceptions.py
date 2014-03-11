@@ -6,8 +6,14 @@ class ToolboxEexception(Exception):
     def __str__(self):
         return self.msg
 
-class ToolboxFileNotFound(ToolboxEexception):
+class FileNotFound(ToolboxEexception):
     pass
 
-class ToolboxConnectionFiled(ToolboxEexception):
+class ConnectionFiled(ToolboxEexception):
+    pass
+
+class CommandExecutionError(ToolboxEexception):
+    pass
+
+class CommandExectuionTimeout(ToolboxEexception):
     pass

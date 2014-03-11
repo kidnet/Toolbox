@@ -1,12 +1,12 @@
 #-*- coding: UTF-8 -*-
 
-from toolbox import exceptions
+from toolbox.exceptions import CommandExecutionFiled
+from toolbox.exceptions import CommandExecutionTimeout
 import os
-import sys
 import time
+import tempfile
 import signal
 import shlex
-import traceback
 import subprocess
 
 class SubWork(object):
@@ -15,32 +15,23 @@ class SubWork(object):
     if timeout, we SIGTERM to child process, and not to cause zombie process
     safe!
     """
-    #trace_back
-    def _trace_back(self):
-        try:
-            type, value, tb = sys.exc_info()
-            return str(''.join(traceback.format_exception(type, value, tb)))
-        except:
-            return ''
-
     def __init__(self, 
-                 stdin=None, 
-                 stdout=None, 
-                 stderr=None, 
-                 cmd=None, 
-                 cwd=None, 
-                 timeout=5*60*60):
+                 cmd, 
+                 timeout=5*60*60,
+                 stdin=None,
+                 stdout=None,
+                 stderr=None):
         """
         default None
         """
         self._cmd = cmd
         self._Popen = None
         self._pid = None
-        self._returncode = None
-        self._stdin = None
+        self._return_code = None
+        self._stdin = stdin
         self._stdout = stdout
         self._stderr = stderr
-        self._cwd = cwd
+        self._cwd = None
         self._timeout = int(timeout)
         self._start_time = None
         self._msg = ''
@@ -63,141 +54,71 @@ class SubWork(object):
         """
         self._send_signal(pid, signal.SIGKILL)
 
-    def _wait(self, _Popen):
+    def _wait(self, Popen):
         """
         Wait child exit signal
         """
-        _Popen.wait()
+        Popen.wait()
 
-    def _free_child(self, pid, _Popen):
+    def _free_child(self, pid, Popen):
         """
         Kill process by pid
         """
         try:
             self._terminate(pid)
             self._kill(pid)
-            self._wait(_Popen)
+            self._wait(Popen)
         except:
             pass
 
-    def run(self):
-        #Run cmd
+    def _run(self):
+        #Run cmd.
         cmd = shlex.split(self._cmd)
-        code = True
-        try:
-            self._Popen = subprocess.Popen(args=cmd, 
-                                          stdout=self.__stdout, 
-                                          stderr=self.__stderr, 
-                                          cwd=self.__cwd)
-            self._pid = self.__Popen.pid
-            self._start_time = time.time()
-            while (self._Popen.poll() == None and 
-                    (time.time() - self._start_time) < self._timeout):
-                time.sleep(1)
-        except:
-            self._msg += self._trace_back()
-            self._returncode = -9998
-            code = False
-
-        # Check returncode
-        # Child is not exit yet
-        if self._Popen.poll() == None: 
-            self._free_child(self._pid, self._Popen)
-            self._returncode = -9999
-        else:
-            self._returncode = self._Popen.poll()
-
-        return {"code":code,
-                "msg":self._msg,
-                "reg":{"returncode":self._returncode}
-                }
-
-    def _run_without_timeout(self):
-        #Run cmd
-        cmd = shlex.split(self._cmd)
-        code = True
         try:
             self._Popen = subprocess.Popen(args=cmd, 
                                           stdout=self._stdout, 
                                           stderr=self._stderr, 
                                           cwd=self._cwd)
-        except:
-            self._msg += self._trace_back()
-            self._returncode = -9998
-            code = False
-
-        return {"code":code,
-                "msg":self._msg,
-                "reg":{"returncode":self._returncode}
-                }
-
-def get_cur_path():
-    try:
-        return os.path.normpath(os.path.join(os.getcwdu(), 
-                                os.path.dirname(__file__)))
-    except:
-        return
-
-def check_returncode(dic=None):
-    #Check returncode
-    if not isinstance(dic, dict):
-        raise TypeError, "dist must be a Distribution instance"
-    returncode = dic["reg"]["returncode"]
-    if returncode is None or int(returncode) == 0:
-        return True, dic["msg"]
-    else:
-        return False, dic["msg"]
-
-def shell_to_tty(_cmd=None, _cwd=None, _timeout=5*60*60): 
-    """
-    Execute CMD and output result to tty
-    """
-    try:
-        shell = SubWork(cmd=_cmd, 
-                        stdout=None, 
-                        stderr=None, 
-                        cwd=_cwd, 
-                        timeout=_timeout)
-        if _timeout == 0:
-            return check_returncode(shell.run_without_timeout())
+            self._pid = self._Popen.pid
+            self._start_time = time.time()
+            while (self._Popen.poll() == None and 
+                    (time.time() - self._start_time) < self._timeout):
+                time.sleep(1)
+        except (OSError, ValueError), e:
+            raise CommandExecutionFiled("Execute Commonand Filed.", e)
+            
+        # Child is not exit yet.
+        if self._Popen.poll() == None: 
+            self._free_child(self._pid, self._Popen)
+            raise CommandExecutionTimeout("Command Execution Timeout %ds." % self._timeout)
         else:
-            return check_returncode(shell.run())
-    except:
-        return False, trace_back()
+            self._return_code = self._Popen.poll()
 
-def shell_to_file(_cmd=None, _cwd=None, _timeout=5*60*60, outtype=0): 
-    """
-    Execute CMD and output result to file
-    """
-    try:
+    def execute(self):
+        if self._stdout == None or self._stderr():
+            self._stdout = tempfile.TemporaryFile()
+            self._stderr = tempfile.TemporaryFile()
+            use_tempfile = True
+
         try:
-            if outtype == 0:
-                fout = tempfile.TemporaryFile()
-                ferr = tempfile.TemporaryFile()
-            elif outtype == 1:
-                out_path = os.path.join(get_cur_path(), 
-                                        "%s__tmp_out" % str(time.time()))
-                err_path = os.path.join(get_cur_path(), 
-                                        "%s__tmp_out" % str(time.time()))
-                fout = open(out_path, 'a+')
-                ferr = open(err_path, 'a+')
-            shell = SubWork(cmd=_cmd, 
-                            stdout=fout, 
-                            stderr=ferr, 
-                            cwd=_cwd, 
-                            timeout=_timeout)
-            if _timeout == 0:
-                req = check_returncode(shell.run_without_timeout())
-            else:
-                req = check_returncode(shell.run())
-            fout.seek(0)
-            out = fout.read()
-            ferr.seek(0)
-            err = "\n====Error Log Start====\n%s\n====Error Log End====" % ferr.read()
-            out = out + err
-            return req[0], _cmd + "\n" + str(out)
-        finally:
-            fout.close()
-            ferr.close()
-    except:
-        return False, trace_back()
+            self._run()
+        except:
+            raise
+
+        if use_tempfile:
+            try:
+                self._stdout.seek(0)
+                stdout = self._stdout.read()
+                self._stderr.seek(0)
+                stderr = self._stderr.read()
+            finally:
+                self._stdout.close()
+                self._stderr.close()
+        else:
+            stdout = self._stdout
+            stderr = self._stderr
+
+        return {"code":self._return_code,
+                "stdout":stdout,
+                "stderr":stderr
+                }
