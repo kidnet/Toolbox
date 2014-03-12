@@ -95,28 +95,29 @@ class SubWork(object):
             self._return_code = self._Popen.poll()
 
     def execute(self):
-        if self._stdout == None or self._stderr():
-            self._stdout = tempfile.TemporaryFile()
-            self._stderr = tempfile.TemporaryFile()
-            use_tempfile = True
-
         try:
-            self._run()
-        except:
-            raise
+            if self._stdout == None or self._stderr == None:
+                self._stdout = tempfile.TemporaryFile()
+                self._stderr = tempfile.TemporaryFile()
+                use_tempfile = True
 
-        if use_tempfile:
             try:
+                self._run()
+            except:
+                raise
+
+            if use_tempfile:
                 self._stdout.seek(0)
                 stdout = self._stdout.read()
                 self._stderr.seek(0)
                 stderr = self._stderr.read()
-            finally:
+            else:
+                stdout = self._stdout
+                stderr = self._stderr
+        finally:
+            if use_tempfile:
                 self._stdout.close()
                 self._stderr.close()
-        else:
-            stdout = self._stdout
-            stderr = self._stderr
 
         return {"code":self._return_code,
                 "stdout":stdout,
